@@ -1,0 +1,1155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="v5 Tracker">
+<meta name="theme-color" content="#1B2E4B">
+<title>Strength v5</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;background:#F0F2F6}
+body{font-family:'DM Sans',system-ui,sans-serif;
+  padding-top:env(safe-area-inset-top);
+  padding-bottom:env(safe-area-inset-bottom)}
+#root{height:100%;overflow-y:auto;-webkit-overflow-scrolling:touch;scroll-behavior:smooth}
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none}
+input,textarea,button{font-family:'DM Sans',system-ui,sans-serif;-webkit-appearance:none}
+input{outline:none}textarea{outline:none}
+.mono{font-family:'DM Mono',monospace}
+::-webkit-scrollbar{display:none}
+@keyframes slideUp{from{transform:translateY(14px);opacity:0}to{transform:translateY(0);opacity:1}}
+@keyframes pop{0%{transform:scale(1)}45%{transform:scale(1.15)}100%{transform:scale(1)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.slide-up{animation:slideUp .22s ease both}
+.pop{animation:pop .2s ease}
+.pulsing{animation:pulse 1.4s ease infinite}
+</style>
+</head>
+<body><div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useCallback,useRef,useMemo}=React;
+
+// ── STORAGE KEYS ─────────────────────────────────────────────────────────────
+const SK={sessions:'v5_sessions',queue:'v5_queue',url:'v5_url',synced:'v5_synced'};
+
+// ── SHEET COLUMNS (order matters — matches Apps Script) ───────────────────────
+const COLS=['session_id','date','day_key','session_name','entry_type','block',
+  'exercise','set_num','weight_lb','reps','exercise_rpe','e1rm_lb',
+  'metric1_label','metric1_value','metric2_label','metric2_value',
+  'session_rpe','hrv_ms','rhr_bpm','recovery_pct','notes','logged_at'];
+
+// ── PROGRAM ───────────────────────────────────────────────────────────────────
+const DAYS_ORDER=['mon','tue','wed','thu','fri','sat','sun'];
+const todayKey=()=>DAYS_ORDER[[6,0,1,2,3,4,5][new Date().getDay()]];
+const todayISO=()=>new Date().toISOString().slice(0,10);
+
+const P={
+  mon:{label:'Monday',short:'MON',kind:'strength',name:'Strength A',
+    a:'#059669',dk:'#065F46',lt:'#D1FAE5',pl:'#ECFDF5',
+    warmup:'3 min easy row → glute bridge ×15 → clamshell ×12/side → scapular pull-ups ×8 → PVC OH squat ×8 → clean warm-up: bar ×3, 40%×3, 55%×2',
+    exercises:[
+      {id:'hpc',block:'A',name:'Hang Power Clean',rx:'4×3 · 60–70% 1RM',sets:4,reps:3,rest:150,
+       cue:'Mid-thigh start. Violent hip extension, fast elbows. Full reset each rep. Film from side.'},
+      {id:'sq',block:'B',name:'Back Squat',rx:'4×4–6 · RPE 8 · 30X0',sets:4,reps:5,rest:180,
+       cue:'3-sec descent, explosive up. Knees track toes. Stop 1 rep before failure.'},
+      {id:'wpu',block:'C',name:'Weighted Pull-Up',rx:'3×5–7 · RPE 8 · 20X0',sets:3,reps:6,rest:150,
+       cue:'Pronated grip. Dead hang to chin over bar. Controlled descent.'},
+      {id:'abd',block:'D1',name:'Hip Abduction (Band)',rx:'2×20/side · Light band',sets:2,reps:20,rest:0,
+       cue:'Superset D1→D2. Foot slightly internally rotated. No rest D1–D2.'},
+      {id:'clm',block:'D2',name:'Banded Clamshell',rx:'2×20/side · Full ROM',sets:2,reps:20,rest:60,
+       cue:'Stacked hips. Rotate top knee to ceiling. 60s rest then D1.'},
+      {id:'slrdl',block:'E1',name:'Single-Leg RDL (DB)',rx:'3×8/side · Moderate DBs',sets:3,reps:8,rest:0,
+       cue:'Superset E1→E2. Trailing hip stays level. No rest E1–E2.'},
+      {id:'sarow',block:'E2',name:'Single-Arm DB Row',rx:'3×10/side · Heavy DB',sets:3,reps:10,rest:75,
+       cue:'Brace on bench. Elbow to hip. Full reach at bottom. 75s rest then E1.'},
+    ],
+    finisher:{name:'KB Carry Circuit',desc:"3 rounds: Farmer's Carry 30m (heavy KBs) → Suitcase Carry 15m/side → 5×KB Swing (32–40 kg). 80–85%."}},
+
+  tue:{label:'Tuesday',short:'TUE',kind:'z4',name:'Zone 4 · Row Ladder',
+    a:'#D97706',dk:'#78350F',lt:'#FEF3C7',pl:'#FFFBEB',
+    note:'Target: 165–178 bpm (Whoop Zone 4). 1–2 words per breath. Chest strap — wrist HR lags 20–30 sec. Pieces 1–2 are primers, NOT all-out efforts.',
+    pieces:[
+      {label:'Piece 1',dist:'500m',hr:'155–165',anchor:false},
+      {label:'Piece 2',dist:'1,000m',hr:'162–168',anchor:false},
+      {label:'Piece 3',dist:'1,500m',hr:'168–173',anchor:false},
+      {label:'★ Piece 4',dist:'2,000m — ANCHOR',hr:'173–178',anchor:true},
+      {label:'Piece 5',dist:'1,500m',hr:'160–170',anchor:false},
+      {label:'Piece 6',dist:'1,000m',hr:'165–170',anchor:false},
+    ]},
+
+  wed:{label:'Wednesday',short:'WED',kind:'strength',name:'Strength B',
+    a:'#059669',dk:'#065F46',lt:'#D1FAE5',pl:'#ECFDF5',
+    warmup:'3 min easy row → hip hinge drill ×10 → glute bridge ×12 → DL warm-up: 40%×5, 60%×3, 75%×2 → band pull-apart ×15',
+    exercises:[
+      {id:'kbpp',block:'A',name:'KB Single-Arm Push Press',rx:'4×4/side · Heavy KB',sets:4,reps:4,rest:120,
+       cue:'Explosive hip drive initiates press. Full lockout. Alternate arms each set.'},
+      {id:'dl',block:'B',name:'Conventional Deadlift',rx:'4×3–5 · RPE 8 · X0X1',sets:4,reps:4,rest:195,
+       cue:'Brace, drive floor away, lockout with glutes. No touch-and-go. Controlled descent.'},
+      {id:'bp',block:'C',name:'Barbell Bench Press',rx:'3×6–8 · RPE 8 · 30X0',sets:3,reps:7,rest:150,
+       cue:'Retract scapula, slight arch. 3-sec descent, explosive press. Safeties always.'},
+      {id:'fp',block:'D1',name:'Face Pull (Band/Cable)',rx:'3×15–20 · Light-Med',sets:3,reps:17,rest:0,
+       cue:'Shoulder tri-set D1→D2→D3, no rest. Pull to forehead, externally rotate wrists at end range.'},
+      {id:'bpa',block:'D2',name:'Band Pull-Apart',rx:'3×20 · Light band',sets:3,reps:20,rest:0,
+       cue:'Arms straight. Pull to chest, squeeze scapulae. Slow return.'},
+      {id:'wty',block:'D3',name:'W-T-Y Raises (DB prone)',rx:'3×10 each · 2–4 kg max',sets:3,reps:10,rest:90,
+       cue:'W: elbows 90°. T: arms straight. Y: diagonal overhead. Hold 1s. 90s rest after Y. Weight embarrassingly light.'},
+      {id:'bss',block:'E1',name:'Bulgarian Split Squat (DB)',rx:'3×8/side · Pause 1s',sets:3,reps:8,rest:0,
+       cue:'Superset E1→E2. Rear foot elevated. Front foot flat, knee over 2nd toe. Pause at bottom.'},
+      {id:'saflp',block:'E2',name:'Single-Arm DB Floor Press',rx:'3×10/side',sets:3,reps:10,rest:75,
+       cue:'Opposite leg extended. Anti-rotation core demand. 75s rest then E1.'},
+    ],
+    finisher:{name:'Metcon Rounds',desc:'HOME: 4 rounds — Row 100m @85% → 6×KB SA Push Press/side → 10×Goblet Squat. 75% effort, track time.\nAWAY: swap row for 20×KB Swing (32 kg).'}},
+
+  thu:{label:'Thursday',short:'THU',kind:'z2',name:'Zone 2 · Aerobic Base',
+    a:'#0284C7',dk:'#0C4A6E',lt:'#BAE6FD',pl:'#F0F9FF',
+    note:'Target: 133–146 bpm (Whoop Zone 1). Full sentences without pausing. When Whoop shows Zone 1, that is correct. Do NOT push into Whoop Zone 2 — that is physiological Zone 3.'},
+
+  fri:{label:'Friday',short:'FRI',kind:'strength',name:'Strength C',
+    a:'#059669',dk:'#065F46',lt:'#D1FAE5',pl:'#ECFDF5',
+    warmup:'3 min easy row → thoracic rotation ×10/side → wall ankle drill ×10/side → PVC OH squat ×10 → OHP warm-up: bar ×5, 40%×3, 60%×2 → pull-apart ×15',
+    exercises:[
+      {id:'ppress',block:'A1',name:'Push Press (contrast — A1 then A2)',rx:'4×4 · 70–80% 1RM',sets:4,reps:4,rest:0,
+       cue:'Do A1 then IMMEDIATELY A2, then 2.5 min rest. Explosive hip drive. Full lockout.'},
+      {id:'boxjmp',block:'A2',name:'Box Jump (step down)',rx:'4×4 · Bodyweight',sets:4,reps:4,rest:150,
+       cue:'Immediately after push press. Step down — NEVER jump down. Hip discomfort → weighted step-ups.'},
+      {id:'ohp',block:'B',name:'Barbell OHP Strict',rx:'4×4–6 · RPE 8 · 20X1',sets:4,reps:5,rest:180,
+       cue:'Full lockout, bar over mid-foot. Brace hard. No hyperextension.'},
+      {id:'chup',block:'C',name:'Chin-Up (Supinated)',rx:'3×6–10 · BW or weighted · RPE 8',sets:3,reps:8,rest:150,
+       cue:'Different elbow path vs. pull-up Monday. Dead hang start.'},
+      {id:'nhc',block:'D1',name:'Nordic Hamstring Curl',rx:'3×5–8 · BW · 4-sec descent',sets:3,reps:6,rest:0,
+       cue:'Superset D1→D2. Anchor feet. Lower 4 sec — catch with hands. Build depth over 4–6 wks. DOMS expected wks 1–2.'},
+      {id:'trxrow',block:'D2',name:'Tempo Ring/TRX Row',rx:'3×8–10 · 30X3 tempo',sets:3,reps:9,rest:75,
+       cue:'3-sec lowering. Feet elevated. 75s rest then D1.'},
+      {id:'slhip',block:'E1',name:'Single-Leg Hip Thrust (BB)',rx:'3×10/side · Full extension',sets:3,reps:10,rest:0,
+       cue:'Superset E1→E2. Shoulder on bench. Drive through single heel. Full hip extension at top.'},
+      {id:'saohp',block:'E2',name:'SA KB OH Press (Seated)',rx:'3×10/side · Strict',sets:3,reps:10,rest:75,
+       cue:'No leg drive. Anti-lateral-flexion core demand. 75s rest then E1.'},
+    ],
+    finisher:{name:'EMOM ×7',desc:'HOME: Odd → 12 cal row @85%. Even → 8×Push Press (light) + 8×Push-Up. Add 1 push-up/wk if finishing before :50.\nAWAY: Odd → 15×KB Swing. Even → 8×KB Push Press + 8×Push-Up.'}},
+
+  sat:{label:'Saturday',short:'SAT',kind:'strength',name:'Strength D + Agility',optional:true,
+    a:'#0D9488',dk:'#134E4A',lt:'#CCFBF1',pl:'#F0FDFA',
+    warmup:'Agility ladder 8–10 min → 3 min easy row → cat-cow ×10 → 90/90 hip 1 min/side → dead bug ×8/side → scapular pull-ups ×10',
+    exercises:[
+      {id:'kbcp',block:'A',name:'KB Single-Arm Clean & Press',rx:'4×4/side · Heavy KB',sets:4,reps:4,rest:120,
+       cue:'Clean from hang → rack → press overhead. Power + stability. Rest 2 min.'},
+      {id:'tbdl',block:'B',name:'Trap Bar Deadlift',rx:'4×5–7 · RPE 7–8',sets:4,reps:6,rest:180,
+       cue:'More upright torso vs. conventional. Good hip + knee drive.'},
+      {id:'ngpu',block:'C',name:'Weighted Pull-Up (Neutral)',rx:'3×5–8 · RPE 8',sets:3,reps:6,rest:150,
+       cue:'Neutral handles — reduced shoulder stress end of week.'},
+      {id:'ohc',block:'D1',name:'Overhead Plate Carry',rx:'3×20m · Arms locked',sets:3,reps:1,rest:0,
+       cue:'D1→D2→D3 no rest. Thoracic extension + shoulder stability.'},
+      {id:'fmc',block:'D2',name:"Farmer's Carry (Double KB)",rx:'3×20m · Heavy KBs',sets:3,reps:1,rest:0,
+       cue:'Tall spine. Max grip + core. No lateral lean.'},
+      {id:'zrc',block:'D3',name:'Zercher Carry (Barbell)',rx:'3×20m · Moderate load',sets:3,reps:1,rest:90,
+       cue:'Bar in elbow crooks. Massive anterior core demand. Rest 90s then D1.'},
+      {id:'ecsd',block:'E1',name:'SL Eccentric Step-Down',rx:'3×10/side · BW · 4-sec descent',sets:3,reps:10,rest:0,
+       cue:'Stand on box, lower free heel 4 sec. Catch and return. No rest E1–E2.'},
+      {id:'stcry',block:'E2',name:'Suitcase Carry (Single KB)',rx:'3×20m/side · Heavy KB',sets:3,reps:1,rest:90,
+       cue:'Tall spine. Do not lean toward or away from load. Rest 90s then E1.'},
+    ],
+    finisher:{name:'Zone 2 Add-On (optional)',desc:'20 min easy row @133–146 bpm. Active recovery — not performance. Skip if fatigue elevated.'}},
+
+  sun:{label:'Sunday',short:'SUN',kind:'rest',name:'Rest Day',
+    a:'#7C3AED',dk:'#4C1D95',lt:'#EDE9FE',pl:'#FAF5FF'},
+};
+
+// ── HELPERS ───────────────────────────────────────────────────────────────────
+const epley=(w,r)=>r<=1?+w:+(+w*(1++r/30)).toFixed(1);
+const fmtTime=(s)=>`${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;
+const ls={
+  get:(k)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):null}catch{return null}},
+  set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{}},
+};
+
+// ── SESSION → ROWS ────────────────────────────────────────────────────────────
+function sessionToRows(sess){
+  const day=P[sess.dayKey];
+  const ts=new Date().toISOString();
+  const base=[sess.id,sess.date,sess.dayKey,day.name];
+  const rows=[];
+  const fill=(entry_type,block,exercise,set_num,weight,reps,ex_rpe,e1rm,m1l,m1v,m2l,m2v)=>{
+    rows.push([...base,entry_type,block,exercise,set_num,
+      weight??'',reps??'',ex_rpe??'',e1rm??'',
+      m1l??'',m1v??'',m2l??'',m2v??'',
+      sess.sessionRpe??'',sess.hrv??'',sess.rhr??'',sess.rec??'',
+      sess.sessionNotes??'',ts]);
+  };
+
+  if(sess.exercises){
+    sess.exercises.forEach(ex=>{
+      (ex.sets||[]).forEach((s,i)=>{
+        if(!s.weight&&!s.reps)return;
+        const e=s.weight&&s.reps>0?epley(+s.weight,+s.reps):'';
+        fill('set',ex.block,ex.name,i+1,s.weight,s.reps,ex.rpe,e,'','','','');
+      });
+    });
+    if(sess.finisher){
+      const f=sess.finisher;
+      if(f.rounds||f.time||f.load)
+        fill('finisher','FIN',day.finisher?.name||'Finisher',1,f.load,'','','','rounds',f.rounds||'','time_min',f.time||'');
+    }
+  }
+  if(sess.pieces){
+    sess.pieces.forEach((p,i)=>{
+      if(!p.split&&!p.hr)return;
+      fill('piece',`P${i+1}`,p.label,i+1,'','','','','split_500m',p.split||'','hr_bpm',p.hr||'');
+    });
+  }
+  if(sess.dayKey==='thu'){
+    fill('conditioning','',day.name,1,'','','','','duration_min',sess.duration||'','avg_hr',sess.avgHr||'');
+    if(sess.pace) fill('conditioning_detail','',day.name,2,'','','','','avg_pace_500m',sess.pace||'','pace_at_140',sess.paceAt140||'');
+  }
+  return rows;
+}
+
+// ── SYNC ──────────────────────────────────────────────────────────────────────
+async function flushQueue(url){
+  if(!url||!navigator.onLine)return false;
+  const queue=ls.get(SK.queue)||[];
+  if(!queue.length)return true;
+  try{
+    await fetch(url,{method:'POST',mode:'no-cors',body:JSON.stringify({rows:queue,header:COLS})});
+    ls.set(SK.queue,[]);
+    return true;
+  }catch{return false;}
+}
+
+// ── MAKE SESSION ──────────────────────────────────────────────────────────────
+function makeSession(dayKey,lastSess){
+  const day=P[dayKey];
+  if(!day||day.kind==='rest')return null;
+  const id=`${todayISO()}_${dayKey}_${Date.now()}`;
+  const base={id,date:todayISO(),dayKey,startTime:Date.now(),
+    hrv:'',rhr:'',rec:'',sessionRpe:'',sessionNotes:''};
+  if(day.kind==='strength'){
+    const exercises=day.exercises.map((ex,i)=>{
+      const lastEx=lastSess?.exercises?.[i];
+      const lastDone=lastEx?.sets?.filter(s=>s.done&&s.weight)||[];
+      return{...ex,rpe:'',sets:Array.from({length:ex.sets},(_,si)=>({
+        weight:lastDone[si]?.weight||lastDone.slice(-1)[0]?.weight||'',
+        reps:ex.reps,done:false
+      }))};
+    });
+    return{...base,exercises,finisher:{rounds:'',time:'',load:'',notes:''}};
+  }
+  if(day.kind==='z4') return{...base,pieces:day.pieces.map(p=>({...p,split:'',hr:''}))};
+  if(day.kind==='z2') return{...base,duration:'',avgHr:'',pace:'',paceAt140:'',
+    hrAt15:'',hrAt30:'',hrAt45:''};
+  return null;
+}
+
+// ── COMPONENTS ────────────────────────────────────────────────────────────────
+const c=(style)=>style;// passthrough for readability
+
+function SyncBadge({pending,syncing,error}){
+  if(syncing) return <span className="pulsing" style={{fontSize:11,color:'#94A3B8'}}>↑ syncing</span>;
+  if(pending>0) return <span style={{fontSize:11,color:'#D97706',fontWeight:600}}>● {pending} pending</span>;
+  if(error) return <span style={{fontSize:11,color:'#EF4444'}}>✗ sync error</span>;
+  return <span style={{fontSize:11,color:'#22C55E'}}>✓ synced</span>;
+}
+
+function RestTimer({secs,onDone}){
+  const [left,setLeft]=useState(secs);
+  const r=useRef();
+  useEffect(()=>{
+    r.current=setInterval(()=>setLeft(l=>{if(l<=1){clearInterval(r.current);onDone?.();return 0;}return l-1;}),1000);
+    return()=>clearInterval(r.current);
+  },[]);
+  const pct=left/secs;
+  const cr=22,circ=2*Math.PI*cr;
+  const col=left<10?'#EF4444':'#059669';
+  return(
+    <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:2}}>
+      <svg width={54} height={54}>
+        <circle cx={27} cy={27} r={cr} fill="none" stroke="#E2E8F0" strokeWidth={3}/>
+        <circle cx={27} cy={27} r={cr} fill="none" stroke={col} strokeWidth={3}
+          strokeDasharray={circ} strokeDashoffset={circ*(1-pct)}
+          strokeLinecap="round" transform="rotate(-90 27 27)"/>
+        <text x={27} y={32} textAnchor="middle" fontSize={12} fontWeight={600}
+          fontFamily="DM Mono,monospace" fill={col}>{fmtTime(left)}</text>
+      </svg>
+      <span style={{fontSize:9,color:'#94A3B8',letterSpacing:'0.05em',fontWeight:600}}>REST</span>
+    </div>
+  );
+}
+
+function SetRow({set,idx,accent,lastWeight,onChange}){
+  const hasData=set.weight!==''||set.reps>0;
+  return(
+    <div style={{display:'flex',alignItems:'center',gap:8,padding:'7px 0',
+      opacity:set.done?0.55:1,transition:'opacity .18s'}}>
+      <div style={{width:20,height:20,borderRadius:5,background:'#F1F5F9',flexShrink:0,
+        display:'flex',alignItems:'center',justifyContent:'center',
+        fontSize:9,fontWeight:700,color:'#94A3B8'}}>{idx+1}</div>
+
+      {/* Weight */}
+      <div style={{flex:1}}>
+        {lastWeight&&!set.weight&&(
+          <div style={{fontSize:8,color:'#CBD5E1',marginBottom:1}}>last: {lastWeight}lb</div>
+        )}
+        <div style={{display:'flex',alignItems:'center',gap:5}}>
+          <input type="number" inputMode="decimal" placeholder={lastWeight||'lb'}
+            value={set.weight}
+            onChange={e=>onChange({...set,weight:e.target.value})}
+            style={{width:68,padding:'8px 8px',borderRadius:9,textAlign:'center',
+              border:`1.5px solid ${set.weight?accent+'55':'#E2E8F0'}`,
+              fontSize:16,fontWeight:600,fontFamily:'DM Mono,monospace',
+              color:'#0F172A',background:set.weight?'#fff':'#F8FAFC'}}/>
+          <span style={{fontSize:10,color:'#94A3B8'}}>lb</span>
+        </div>
+      </div>
+
+      {/* Reps stepper */}
+      <div style={{display:'flex',alignItems:'center',gap:4}}>
+        <button onClick={()=>onChange({...set,reps:Math.max(1,(+set.reps||1)-1)})}
+          style={{width:32,height:32,borderRadius:8,border:'1.5px solid #E2E8F0',
+            background:'#F8FAFC',fontSize:18,color:'#374151',cursor:'pointer',
+            display:'flex',alignItems:'center',justifyContent:'center',lineHeight:1}}>−</button>
+        <span className="mono" style={{width:24,textAlign:'center',fontSize:17,fontWeight:700,color:'#0F172A'}}>{set.reps}</span>
+        <button onClick={()=>onChange({...set,reps:(+set.reps||0)+1})}
+          style={{width:32,height:32,borderRadius:8,border:'1.5px solid #E2E8F0',
+            background:'#F8FAFC',fontSize:18,color:'#374151',cursor:'pointer',
+            display:'flex',alignItems:'center',justifyContent:'center',lineHeight:1}}>+</button>
+      </div>
+
+      {/* e1RM */}
+      {set.weight&&+set.reps>0&&(
+        <div style={{width:42,textAlign:'right',flexShrink:0}}>
+          <div style={{fontSize:8,color:'#94A3B8'}}>e1RM</div>
+          <div className="mono" style={{fontSize:11,fontWeight:600,color:accent}}>
+            {epley(+set.weight,+set.reps)}
+          </div>
+        </div>
+      )}
+
+      {/* Done */}
+      <button onClick={()=>onChange({...set,done:!set.done})}
+        className={set.done?'pop':''}
+        style={{width:34,height:34,borderRadius:10,border:'none',cursor:'pointer',flexShrink:0,
+          background:set.done?accent:'#F1F5F9',
+          color:set.done?'#fff':'#CBD5E1',fontSize:17,
+          display:'flex',alignItems:'center',justifyContent:'center',
+          transition:'all .15s',
+          boxShadow:set.done?`0 3px 10px ${accent}44`:'none'}}>✓</button>
+    </div>
+  );
+}
+
+function ExerciseCard({ex,accent,dk,lt,pl,lastEx,onChange}){
+  const [cueOpen,setCueOpen]=useState(false);
+  const [timer,setTimer]=useState(null);
+  const done=ex.sets.filter(s=>s.done).length;
+  const getLastW=(i)=>{
+    const d=lastEx?.sets?.filter(s=>s.done&&s.weight)||[];
+    return d[i]?.weight||d.slice(-1)[0]?.weight||null;
+  };
+  return(
+    <div style={{background:'#fff',borderRadius:18,overflow:'hidden',
+      boxShadow:'0 2px 14px rgba(0,0,0,.07)',marginBottom:10}}>
+      <div style={{borderLeft:`4px solid ${accent}`,padding:'13px 15px 9px'}}>
+        <div style={{display:'flex',alignItems:'center',gap:7,marginBottom:3}}>
+          <div style={{padding:'2px 7px',borderRadius:5,background:pl,
+            fontSize:9,fontWeight:700,color:dk,letterSpacing:'0.05em'}}>{ex.block}</div>
+          <div style={{fontSize:14,fontWeight:700,color:'#0F172A',flex:1,lineHeight:1.2}}>{ex.name}</div>
+          <div style={{fontSize:11,fontWeight:600,color:done===ex.sets.length?accent:'#94A3B8',flexShrink:0}}>
+            {done}/{ex.sets.length}</div>
+        </div>
+        <div style={{fontSize:11,color:'#64748B',marginBottom:4}}>{ex.rx}</div>
+        <button onClick={()=>setCueOpen(o=>!o)}
+          style={{background:'none',border:'none',padding:0,cursor:'pointer',
+            fontSize:10,color:'#94A3B8',display:'flex',alignItems:'center',gap:3}}>
+          {cueOpen?'▲':'▼'} cue
+        </button>
+        {cueOpen&&<div style={{marginTop:5,padding:'7px 9px',borderRadius:7,background:pl,
+          fontSize:11,color:dk,lineHeight:1.5,fontStyle:'italic'}}>{ex.cue}</div>}
+      </div>
+
+      <div style={{padding:'0 15px'}}>
+        <div style={{display:'flex',gap:8,padding:'5px 0 3px',
+          fontSize:8,fontWeight:700,color:'#94A3B8',letterSpacing:'0.06em',
+          borderBottom:'1px solid #F1F5F9'}}>
+          <span style={{width:20}}>SET</span>
+          <span style={{flex:1}}>WEIGHT</span>
+          <span style={{paddingRight:46}}>REPS</span>
+        </div>
+        {ex.sets.map((s,i)=>(
+          <SetRow key={i} set={s} idx={i} accent={accent} lastWeight={getLastW(i)}
+            onChange={newSet=>{
+              const sets=[...ex.sets];sets[i]=newSet;
+              onChange({...ex,sets});
+              if(newSet.done&&!s.done&&ex.rest>0)setTimer(ex.rest);
+            }}/>
+        ))}
+        <button onClick={()=>onChange({...ex,sets:[...ex.sets,{weight:'',reps:ex.reps,done:false}]})}
+          style={{width:'100%',padding:'5px',border:'1.5px dashed #E2E8F0',borderRadius:7,
+            background:'none',color:'#94A3B8',fontSize:11,cursor:'pointer',margin:'3px 0 8px'}}>
+          + add set
+        </button>
+      </div>
+
+      <div style={{padding:'7px 15px 12px',borderTop:'1px solid #F8FAFC',
+        display:'flex',alignItems:'center',gap:10}}>
+        <div style={{flex:1}}>
+          <div style={{fontSize:9,fontWeight:700,color:'#94A3B8',letterSpacing:'0.05em',marginBottom:4}}>RPE</div>
+          <div style={{display:'flex',gap:3}}>
+            {[6,7,8,9,10].map(n=>(
+              <button key={n} onClick={()=>onChange({...ex,rpe:ex.rpe===n?'':n})}
+                style={{flex:1,padding:'6px 0',borderRadius:6,border:'none',cursor:'pointer',
+                  background:ex.rpe===n?accent:'#F1F5F9',
+                  color:ex.rpe===n?'#fff':'#64748B',
+                  fontSize:12,fontWeight:700,transition:'all .1s',
+                  boxShadow:ex.rpe===n?`0 2px 6px ${accent}44`:'none'}}>{n}</button>
+            ))}
+          </div>
+        </div>
+        {timer&&<RestTimer secs={timer} onDone={()=>setTimer(null)}/>}
+      </div>
+    </div>
+  );
+}
+
+function SessionLogBlock({sess,setSess,accent}){
+  return(
+    <div style={{background:'#fff',borderRadius:16,padding:'13px 15px',
+      boxShadow:'0 2px 10px rgba(0,0,0,.05)',marginBottom:10}}>
+      <div style={{fontSize:9,fontWeight:700,color:'#94A3B8',letterSpacing:'0.08em',marginBottom:9}}>SESSION LOG</div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:7,marginBottom:9}}>
+        {[['HRV (ms)','hrv'],['RHR (bpm)','rhr'],['Rec %','rec']].map(([l,k])=>(
+          <div key={k}>
+            <div style={{fontSize:9,color:'#94A3B8',fontWeight:600,marginBottom:3}}>{l}</div>
+            <input type="number" inputMode="numeric" value={sess[k]||''}
+              onChange={e=>setSess({...sess,[k]:e.target.value})}
+              style={{width:'100%',padding:'7px 6px',borderRadius:8,border:'1.5px solid #E2E8F0',
+                fontSize:15,fontFamily:'DM Mono,monospace',textAlign:'center',
+                color:'#0F172A',background:'#F8FAFC'}}/>
+          </div>
+        ))}
+      </div>
+      <div style={{marginBottom:9}}>
+        <div style={{fontSize:9,color:'#94A3B8',fontWeight:600,marginBottom:4}}>SESSION RPE</div>
+        <div style={{display:'flex',gap:3}}>
+          {[5,6,7,8,9,10].map(n=>(
+            <button key={n} onClick={()=>setSess({...sess,sessionRpe:sess.sessionRpe===n?'':n})}
+              style={{flex:1,padding:'7px 0',borderRadius:7,border:'none',cursor:'pointer',
+                background:sess.sessionRpe===n?'#1B2E4B':'#F1F5F9',
+                color:sess.sessionRpe===n?'#fff':'#64748B',
+                fontSize:12,fontWeight:700,transition:'all .1s'}}>{n}</button>
+          ))}
+        </div>
+      </div>
+      <textarea value={sess.sessionNotes||''}
+        onChange={e=>setSess({...sess,sessionNotes:e.target.value})}
+        placeholder="Notes, how you felt, observations..."
+        rows={2} style={{width:'100%',padding:'8px 10px',borderRadius:8,
+          border:'1.5px solid #E2E8F0',fontSize:13,color:'#0F172A',
+          background:'#F8FAFC',resize:'none'}}/>
+    </div>
+  );
+}
+
+function SessionHeader({dayKey,title,progress,total}){
+  const day=P[dayKey];
+  return(
+    <div style={{background:'linear-gradient(135deg,#1B2E4B,#253D63)',
+      padding:'48px 18px 16px'}}>
+      <div style={{fontSize:10,fontWeight:700,color:'rgba(255,255,255,.45)',
+        letterSpacing:'0.1em',marginBottom:3}}>
+        {new Date().toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'})}
+      </div>
+      <div style={{fontSize:21,fontWeight:700,color:'#fff',letterSpacing:'-0.3px',marginBottom:10}}>
+        {title}
+      </div>
+      {total>0&&<>
+        <div style={{height:3,background:'rgba(255,255,255,.15)',borderRadius:3,overflow:'hidden',marginBottom:5}}>
+          <div style={{height:'100%',background:day.a,borderRadius:3,
+            width:`${(progress/total)*100}%`,transition:'width .3s'}}/>
+        </div>
+        <div style={{fontSize:10,color:'rgba(255,255,255,.45)'}}>
+          {progress} of {total} exercises complete
+        </div>
+      </>}
+    </div>
+  );
+}
+
+// ── STRENGTH SESSION ──────────────────────────────────────────────────────────
+function StrengthSession({sess,setSess,lastSess,onSave}){
+  const day=P[sess.dayKey];
+  const done=sess.exercises.filter(ex=>ex.sets.every(s=>s.done)).length;
+  return(
+    <div style={{paddingBottom:110}}>
+      <SessionHeader dayKey={sess.dayKey} title={day.name} progress={done} total={sess.exercises.length}/>
+      <div style={{padding:'12px 13px 0'}}>
+        {day.warmup&&(
+          <div style={{background:'#fff',borderRadius:13,padding:'11px 13px',marginBottom:10,
+            boxShadow:'0 2px 10px rgba(0,0,0,.05)'}}>
+            <div style={{fontSize:9,fontWeight:700,color:'#94A3B8',letterSpacing:'0.07em',marginBottom:3}}>WARM-UP</div>
+            <div style={{fontSize:12,color:'#64748B',lineHeight:1.5}}>{day.warmup}</div>
+          </div>
+        )}
+        {sess.exercises.map((ex,i)=>(
+          <ExerciseCard key={ex.id} ex={ex} accent={day.a} dk={day.dk} lt={day.lt} pl={day.pl}
+            lastEx={lastSess?.exercises?.[i]}
+            onChange={upd=>{const exs=[...sess.exercises];exs[i]=upd;setSess({...sess,exercises:exs});}}/>
+        ))}
+        {/* Finisher */}
+        <div style={{background:'#fff',borderRadius:18,overflow:'hidden',
+          boxShadow:'0 2px 14px rgba(0,0,0,.07)',marginBottom:10}}>
+          <div style={{height:3,background:'#D97706'}}/>
+          <div style={{padding:'12px 15px'}}>
+            <div style={{fontSize:9,fontWeight:700,color:'#D97706',letterSpacing:'0.08em',marginBottom:3}}>FINISHER</div>
+            <div style={{fontSize:14,fontWeight:700,color:'#0F172A',marginBottom:3}}>{day.finisher.name}</div>
+            <div style={{fontSize:11,color:'#64748B',lineHeight:1.5,marginBottom:10,whiteSpace:'pre-line'}}>{day.finisher.desc}</div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:7,marginBottom:7}}>
+              {[['Rounds','rounds'],['Time (min)','time'],['Load (lb)','load']].map(([l,k])=>(
+                <div key={k}>
+                  <div style={{fontSize:9,color:'#94A3B8',fontWeight:600,marginBottom:3}}>{l}</div>
+                  <input value={sess.finisher[k]||''}
+                    onChange={e=>setSess({...sess,finisher:{...sess.finisher,[k]:e.target.value}})}
+                    style={{width:'100%',padding:'7px 6px',borderRadius:8,border:'1.5px solid #E2E8F0',
+                      fontSize:14,fontFamily:'DM Mono,monospace',textAlign:'center',
+                      color:'#0F172A',background:'#F8FAFC'}}/>
+                </div>
+              ))}
+            </div>
+            <input value={sess.finisher.notes||''}
+              onChange={e=>setSess({...sess,finisher:{...sess.finisher,notes:e.target.value}})}
+              placeholder="home / away · notes"
+              style={{width:'100%',padding:'8px 10px',borderRadius:8,border:'1.5px solid #E2E8F0',
+                fontSize:13,color:'#0F172A',background:'#F8FAFC'}}/>
+          </div>
+        </div>
+        <SessionLogBlock sess={sess} setSess={setSess} accent={day.a}/>
+        <button onClick={onSave}
+          style={{width:'100%',padding:'15px',borderRadius:14,border:'none',
+            background:`linear-gradient(135deg,${day.a},${day.dk})`,
+            color:'#fff',fontSize:16,fontWeight:700,cursor:'pointer',
+            boxShadow:`0 6px 20px ${day.a}55`,letterSpacing:'-0.2px'}}>
+          Save Session ✓
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── CONDITIONING SESSIONS ─────────────────────────────────────────────────────
+function Z4Session({sess,setSess,onSave}){
+  const day=P.tue;
+  return(
+    <div style={{paddingBottom:110}}>
+      <SessionHeader dayKey="tue" title={day.name} progress={0} total={0}/>
+      <div style={{padding:'12px 13px 0'}}>
+        <div style={{background:'#fff',borderRadius:13,padding:'11px 13px',marginBottom:10,
+          boxShadow:'0 2px 10px rgba(0,0,0,.05)'}}>
+          <div style={{fontSize:11,color:'#64748B',lineHeight:1.5,fontStyle:'italic'}}>{day.note}</div>
+        </div>
+        <div style={{background:'#fff',borderRadius:18,overflow:'hidden',
+          boxShadow:'0 2px 14px rgba(0,0,0,.07)',marginBottom:10}}>
+          <div style={{height:3,background:day.a}}/>
+          <div style={{padding:'12px 15px'}}>
+            <div style={{fontSize:9,fontWeight:700,color:day.a,letterSpacing:'0.08em',marginBottom:10}}>PIECE LOG</div>
+            {sess.pieces.map((p,i)=>(
+              <div key={i} style={{marginBottom:12,paddingBottom:12,
+                borderBottom:i<sess.pieces.length-1?'1px solid #F1F5F9':'none'}}>
+                <div style={{display:'flex',alignItems:'center',gap:7,marginBottom:7}}>
+                  <div style={{padding:'3px 9px',borderRadius:6,fontSize:9,fontWeight:700,
+                    background:p.anchor?day.a:day.lt,color:p.anchor?'#fff':day.dk}}>
+                    {p.label}</div>
+                  <div style={{fontSize:13,fontWeight:600,color:'#0F172A'}}>{p.dist}</div>
+                  <div style={{fontSize:10,color:'#94A3B8',marginLeft:'auto'}}>{p.hr} bpm</div>
+                </div>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:7}}>
+                  {[['Split /500m','split'],['Avg HR (bpm)','hr']].map(([l,k])=>(
+                    <div key={k}>
+                      <div style={{fontSize:9,color:'#94A3B8',fontWeight:600,marginBottom:3}}>{l}</div>
+                      <input value={p[k]||''}
+                        onChange={e=>{const ps=[...sess.pieces];ps[i]={...ps[i],[k]:e.target.value};setSess({...sess,pieces:ps});}}
+                        style={{width:'100%',padding:'8px 7px',borderRadius:8,
+                          border:`1.5px solid ${p.anchor?day.a+'55':'#E2E8F0'}`,
+                          fontSize:15,fontFamily:'DM Mono,monospace',textAlign:'center',
+                          color:'#0F172A',background:p.anchor?day.pl:'#F8FAFC'}}/>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <SessionLogBlock sess={sess} setSess={setSess} accent={day.a}/>
+        <button onClick={onSave} style={{width:'100%',padding:'15px',borderRadius:14,border:'none',
+          background:`linear-gradient(135deg,${day.a},${day.dk})`,color:'#fff',
+          fontSize:16,fontWeight:700,cursor:'pointer',boxShadow:`0 6px 20px ${day.a}55`}}>
+          Save Session ✓
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Z2Session({sess,setSess,onSave}){
+  const day=P.thu;
+  const fields=[['Duration (min)','duration'],['Avg HR (bpm)','avgHr'],
+    ['Avg Pace /500m','pace'],['Pace @ 140bpm','paceAt140'],
+    ['HR @ 15 min','hrAt15'],['HR @ 30 min','hrAt30'],['HR @ 45 min','hrAt45']];
+  return(
+    <div style={{paddingBottom:110}}>
+      <SessionHeader dayKey="thu" title={day.name} progress={0} total={0}/>
+      <div style={{padding:'12px 13px 0'}}>
+        <div style={{background:'#fff',borderRadius:13,padding:'11px 13px',marginBottom:10,
+          boxShadow:'0 2px 10px rgba(0,0,0,.05)'}}>
+          <div style={{fontSize:11,color:'#64748B',lineHeight:1.5,fontStyle:'italic'}}>{day.note}</div>
+        </div>
+        <div style={{background:'#fff',borderRadius:18,overflow:'hidden',
+          boxShadow:'0 2px 14px rgba(0,0,0,.07)',marginBottom:10}}>
+          <div style={{height:3,background:day.a}}/>
+          <div style={{padding:'12px 15px'}}>
+            <div style={{fontSize:9,fontWeight:700,color:day.a,letterSpacing:'0.08em',marginBottom:10}}>SESSION DATA</div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+              {fields.map(([l,k])=>(
+                <div key={k}>
+                  <div style={{fontSize:9,color:'#94A3B8',fontWeight:600,marginBottom:3}}>{l}</div>
+                  <input value={sess[k]||''} onChange={e=>setSess({...sess,[k]:e.target.value})}
+                    style={{width:'100%',padding:'8px 7px',borderRadius:8,border:'1.5px solid #E2E8F0',
+                      fontSize:15,fontFamily:'DM Mono,monospace',textAlign:'center',
+                      color:'#0F172A',background:'#F8FAFC'}}/>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        <SessionLogBlock sess={sess} setSess={setSess} accent={day.a}/>
+        <button onClick={onSave} style={{width:'100%',padding:'15px',borderRadius:14,border:'none',
+          background:`linear-gradient(135deg,${day.a},${day.dk})`,color:'#fff',
+          fontSize:16,fontWeight:700,cursor:'pointer',boxShadow:`0 6px 20px ${day.a}55`}}>
+          Save Session ✓
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── HOME SCREEN ───────────────────────────────────────────────────────────────
+function HomeScreen({onStart,sessions,syncPending,syncError,syncBusy,lastForDay}){
+  const [sel,setSel]=useState(todayKey());
+  const day=P[sel];
+  const last=lastForDay(sel);
+  const todaySessions=Object.values(sessions).filter(s=>s.date===todayISO()&&s.dayKey===sel);
+  return(
+    <div style={{paddingBottom:100}}>
+      <div style={{background:'linear-gradient(135deg,#1B2E4B,#253D63)',
+        padding:'52px 18px 0'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:6}}>
+          <div>
+            <div style={{fontSize:10,fontWeight:700,color:'rgba(255,255,255,.45)',
+              letterSpacing:'0.1em',marginBottom:3}}>STRENGTH PROGRAM v5</div>
+            <div style={{fontSize:22,fontWeight:700,color:'#fff',letterSpacing:'-0.3px'}}>
+              {new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'})}
+            </div>
+          </div>
+          <div style={{paddingTop:4}}>
+            <SyncBadge pending={syncPending} syncing={syncBusy} error={syncError}/>
+          </div>
+        </div>
+        {/* Day pills */}
+        <div style={{display:'flex',gap:7,overflowX:'auto',padding:'14px 0',scrollbarWidth:'none',marginLeft:-2}}>
+          {DAYS_ORDER.map(k=>{
+            const d=P[k];
+            const isSel=sel===k;
+            const hasLog=Object.values(sessions).some(s=>s.dayKey===k);
+            return(
+              <button key={k} onClick={()=>setSel(k)}
+                style={{flexShrink:0,padding:'7px 12px',borderRadius:10,cursor:'pointer',
+                  background:isSel?d.a:'rgba(255,255,255,.1)',
+                  color:isSel?'#fff':'rgba(255,255,255,.7)',
+                  border:`1.5px solid ${isSel?d.a:'transparent'}`,
+                  fontFamily:'DM Sans,sans-serif',fontWeight:600,fontSize:11,
+                  display:'flex',flexDirection:'column',alignItems:'center',gap:1,
+                  position:'relative',transition:'all .15s',
+                  boxShadow:isSel?`0 3px 10px ${d.a}55`:'none'}}>
+                {hasLog&&<div style={{position:'absolute',top:5,right:5,width:4,height:4,
+                  borderRadius:'50%',background:isSel?'rgba(255,255,255,.7)':d.a}}/>}
+                <span style={{letterSpacing:'0.06em'}}>{d.short}</span>
+                <span style={{fontSize:8,opacity:.75,fontWeight:400}}>
+                  {d.name.replace('Strength ','Str ').replace(' + Agility','').split('·')[0].trim()}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div style={{padding:'14px 13px 0'}}>
+        <div className="slide-up" style={{background:'#fff',borderRadius:20,overflow:'hidden',
+          boxShadow:'0 4px 20px rgba(0,0,0,.08)',marginBottom:12}}>
+          <div style={{height:4,background:day.a}}/>
+          <div style={{padding:'16px 16px 18px'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:12}}>
+              <div>
+                <div style={{fontSize:10,fontWeight:700,color:day.a,letterSpacing:'0.08em',marginBottom:3}}>
+                  {day.kind==='rest'?'REST':day.kind==='strength'?'STRENGTH':day.kind==='z4'?'ZONE 4':'ZONE 2'}
+                  {day.optional?' · OPTIONAL':''}
+                </div>
+                <div style={{fontSize:20,fontWeight:700,color:'#0F172A',letterSpacing:'-0.3px'}}>{day.name}</div>
+              </div>
+              <div style={{width:42,height:42,borderRadius:11,background:day.pl,
+                display:'flex',alignItems:'center',justifyContent:'center',fontSize:20}}>
+                {day.kind==='rest'?'😴':day.kind==='strength'?'🏋️':day.kind==='z4'?'🔥':'🚣'}
+              </div>
+            </div>
+
+            {day.exercises&&(
+              <div style={{marginBottom:14}}>
+                {day.exercises.map(ex=>(
+                  <div key={ex.id} style={{display:'flex',alignItems:'center',gap:7,padding:'4px 0'}}>
+                    <div style={{width:24,height:18,borderRadius:4,background:day.lt,flexShrink:0,
+                      display:'flex',alignItems:'center',justifyContent:'center',
+                      fontSize:8,fontWeight:700,color:day.dk}}>{ex.block}</div>
+                    <div style={{fontSize:12,color:'#374151',flex:1}}>{ex.name}</div>
+                    <div style={{fontSize:10,color:'#94A3B8'}}>{ex.rx.split('·')[0].trim()}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {day.pieces&&(
+              <div style={{display:'flex',gap:5,flexWrap:'wrap',marginBottom:14}}>
+                {day.pieces.map(p=>(
+                  <div key={p.label} style={{padding:'4px 9px',borderRadius:7,fontSize:11,fontWeight:600,
+                    background:p.anchor?day.a:day.pl,color:p.anchor?'#fff':day.dk}}>{p.dist}</div>
+                ))}
+              </div>
+            )}
+
+            {last&&(
+              <div style={{borderTop:'1px solid #F1F5F9',paddingTop:8,marginBottom:12,
+                fontSize:11,color:'#94A3B8'}}>
+                Last: {new Date(last.date+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'})}
+                {last.sessionRpe&&` · Session RPE ${last.sessionRpe}`}
+              </div>
+            )}
+
+            {day.kind!=='rest'&&(
+              <button onClick={()=>onStart(sel)}
+                style={{width:'100%',padding:'13px',borderRadius:13,border:'none',cursor:'pointer',
+                  background:todaySessions.length>0?'#F1F5F9':`linear-gradient(135deg,${day.a},${day.dk})`,
+                  color:todaySessions.length>0?'#64748B':'#fff',
+                  fontSize:15,fontWeight:700,letterSpacing:'-0.2px',
+                  boxShadow:todaySessions.length>0?'none':`0 5px 18px ${day.a}55`,
+                  transition:'all .15s'}}>
+                {todaySessions.length>0?'✓ Logged Today — Log Again':`Start ${day.name} →`}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Recent sessions */}
+        {last&&last.exercises&&(
+          <div style={{background:'#fff',borderRadius:14,padding:'12px 14px',
+            boxShadow:'0 2px 10px rgba(0,0,0,.05)'}}>
+            <div style={{fontSize:9,fontWeight:700,color:'#94A3B8',letterSpacing:'0.07em',marginBottom:9}}>
+              LAST SESSION · {new Date(last.date+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'})}
+            </div>
+            {last.exercises.slice(0,4).map(ex=>{
+              const top=(ex.sets||[]).filter(s=>s.done&&s.weight&&s.reps)
+                .reduce((b,s)=>epley(+s.weight,+s.reps)>epley(+(b.weight||0),+(b.reps||1))?s:b,{});
+              return(
+                <div key={ex.id} style={{display:'flex',justifyContent:'space-between',
+                  alignItems:'center',padding:'5px 0',borderBottom:'1px solid #F8FAFC'}}>
+                  <div style={{fontSize:12,color:'#374151'}}>{ex.name}</div>
+                  {top.weight
+                    ?<div className="mono" style={{fontSize:12,color:'#0F172A',fontWeight:500}}>
+                        {top.weight}lb×{top.reps}</div>
+                    :<div style={{fontSize:11,color:'#CBD5E1'}}>—</div>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── HISTORY SCREEN ────────────────────────────────────────────────────────────
+function HistoryScreen({sessions,syncedIds}){
+  const [open,setOpen]=useState(null);
+  const sorted=Object.values(sessions).sort((a,b)=>b.date.localeCompare(a.date)||b.startTime-a.startTime);
+  if(!sorted.length) return(
+    <div style={{padding:'100px 20px',textAlign:'center'}}>
+      <div style={{fontSize:42,marginBottom:10}}>📋</div>
+      <div style={{fontSize:16,fontWeight:600,color:'#374151',marginBottom:5}}>No sessions yet</div>
+      <div style={{fontSize:13,color:'#94A3B8'}}>Start logging from the Today tab</div>
+    </div>
+  );
+  return(
+    <div style={{padding:'52px 13px 110px'}}>
+      <div style={{fontSize:20,fontWeight:700,color:'#0F172A',marginBottom:14}}>History</div>
+      {sorted.map(sess=>{
+        const day=P[sess.dayKey];
+        const isSynced=syncedIds.includes(sess.id);
+        const isOpen=open===sess.id;
+        return(
+          <div key={sess.id} style={{background:'#fff',borderRadius:14,
+            boxShadow:'0 2px 10px rgba(0,0,0,.05)',marginBottom:9,overflow:'hidden'}}>
+            <button onClick={()=>setOpen(isOpen?null:sess.id)}
+              style={{width:'100%',padding:'13px 14px',border:'none',background:'none',
+                cursor:'pointer',display:'flex',alignItems:'center',gap:10,textAlign:'left'}}>
+              <div style={{width:36,height:36,borderRadius:9,background:day.pl,flexShrink:0,
+                display:'flex',alignItems:'center',justifyContent:'center',
+                borderLeft:`3px solid ${day.a}`}}>
+                <span style={{fontSize:9,fontWeight:800,color:day.a}}>{day.short}</span>
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:700,color:'#0F172A'}}>{day.name}</div>
+                <div style={{fontSize:10,color:'#94A3B8'}}>
+                  {new Date(sess.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}
+                  {sess.sessionRpe&&` · RPE ${sess.sessionRpe}`}
+                </div>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:2}}>
+                <span style={{fontSize:9,color:isSynced?'#22C55E':'#D97706',fontWeight:600}}>
+                  {isSynced?'✓ synced':'● pending'}</span>
+                <span style={{color:'#94A3B8',fontSize:13}}>{isOpen?'▲':'▼'}</span>
+              </div>
+            </button>
+            {isOpen&&(
+              <div style={{padding:'0 14px 12px',borderTop:'1px solid #F1F5F9'}}>
+                {sess.exercises?.slice(0,5).map(ex=>{
+                  const top=(ex.sets||[]).filter(s=>s.done&&s.weight&&s.reps)
+                    .reduce((b,s)=>epley(+s.weight,+s.reps)>epley(+(b.weight||0),+(b.reps||1))?s:b,{});
+                  return(
+                    <div key={ex.id} style={{display:'flex',justifyContent:'space-between',
+                      alignItems:'center',padding:'7px 0',borderBottom:'1px solid #F8FAFC'}}>
+                      <div>
+                        <div style={{fontSize:12,fontWeight:600,color:'#374151'}}>{ex.name}</div>
+                        {ex.sets?.filter(s=>s.done&&s.weight).length>0&&(
+                          <div style={{fontSize:10,color:'#94A3B8'}}>
+                            {ex.sets.filter(s=>s.done&&s.weight).map(s=>`${s.weight}×${s.reps}`).join(' · ')}
+                          </div>
+                        )}
+                      </div>
+                      {top.weight&&(
+                        <div style={{textAlign:'right'}}>
+                          <div style={{fontSize:8,color:'#94A3B8'}}>e1RM</div>
+                          <div className="mono" style={{fontSize:13,fontWeight:700,color:day.a}}>
+                            {epley(+top.weight,+top.reps)}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {sess.sessionNotes&&(
+                  <div style={{marginTop:7,fontSize:11,color:'#64748B',fontStyle:'italic'}}>
+                    "{sess.sessionNotes}"</div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── SETTINGS SCREEN ───────────────────────────────────────────────────────────
+const APPS_SCRIPT_CODE=`function doPost(e) {
+  try {
+    var data = JSON.parse(e.postData.contents);
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("Log") || ss.getActiveSheet();
+    if (sheet.getLastRow() === 0) {
+      sheet.appendRow(data.header);
+    }
+    data.rows.forEach(function(row) { sheet.appendRow(row); });
+  } catch(err) { /* silent fail */ }
+  return ContentService.createTextOutput("ok");
+}
+
+function doGet(e) {
+  return ContentService.createTextOutput("v5 Tracker ready");
+}`;
+
+function SettingsScreen({sheetsUrl,setSheetsUrl,syncPending,onForceSync}){
+  const [url,setUrl]=useState(sheetsUrl||'');
+  const [saved,setSaved]=useState(false);
+  const [testing,setTesting]=useState(false);
+  const [testResult,setTestResult]=useState(null);
+
+  const save=()=>{
+    ls.set(SK.url,url.trim());
+    setSheetsUrl(url.trim());
+    setSaved(true);
+    setTimeout(()=>setSaved(false),2000);
+  };
+
+  const test=async()=>{
+    if(!url.trim())return;
+    setTesting(true);setTestResult(null);
+    try{
+      await fetch(url.trim(),{method:'GET',mode:'no-cors'});
+      setTestResult('ok');
+    }catch{setTestResult('error');}
+    setTesting(false);
+  };
+
+  return(
+    <div style={{padding:'52px 16px 110px'}}>
+      <div style={{fontSize:20,fontWeight:700,color:'#0F172A',marginBottom:4}}>Settings</div>
+      <div style={{fontSize:13,color:'#64748B',marginBottom:20}}>
+        One-time setup to connect your workout log to Google Sheets.
+      </div>
+
+      {/* Step by step */}
+      <div style={{background:'#fff',borderRadius:16,padding:'16px',
+        boxShadow:'0 2px 10px rgba(0,0,0,.05)',marginBottom:14}}>
+        <div style={{fontSize:11,fontWeight:700,color:'#1B2E4B',letterSpacing:'0.06em',marginBottom:12}}>
+          SETUP GUIDE — ONE TIME
+        </div>
+        {[
+          ['1','Create your Google Sheet','Go to sheets.google.com → New spreadsheet. Name it "v5 Training Log". You can rename the default sheet "Log".'],
+          ['2','Open Apps Script','Inside the sheet: Extensions → Apps Script. Delete any code in the editor.'],
+          ['3','Paste this code','Copy the code block below and paste it into the Apps Script editor.'],
+          ['4','Save & Deploy','Click Save (disk icon). Then Deploy → New deployment → Web app. Execute as: Me. Who has access: Anyone. Click Deploy. Copy the web app URL.'],
+          ['5','Authorize','Google will ask you to authorize the script. Click Review permissions → your account → Allow.'],
+          ['6','Paste URL below','Paste the deployment URL into the field below and tap Save.'],
+        ].map(([n,title,desc])=>(
+          <div key={n} style={{display:'flex',gap:10,marginBottom:12}}>
+            <div style={{width:24,height:24,borderRadius:7,background:'#1B2E4B',flexShrink:0,
+              display:'flex',alignItems:'center',justifyContent:'center',
+              fontSize:11,fontWeight:700,color:'#fff',marginTop:1}}>{n}</div>
+            <div>
+              <div style={{fontSize:13,fontWeight:600,color:'#0F172A',marginBottom:2}}>{title}</div>
+              <div style={{fontSize:11,color:'#64748B',lineHeight:1.5}}>{desc}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Code block */}
+      <div style={{background:'#0F172A',borderRadius:12,padding:'12px',marginBottom:14,position:'relative'}}>
+        <div style={{fontSize:9,fontWeight:700,color:'#94A3B8',letterSpacing:'0.08em',marginBottom:8}}>
+          APPS SCRIPT CODE — COPY THIS
+        </div>
+        <pre style={{fontSize:10,color:'#86EFAC',lineHeight:1.6,overflow:'auto',
+          fontFamily:'DM Mono,monospace',whiteSpace:'pre-wrap',margin:0}}>
+          {APPS_SCRIPT_CODE}
+        </pre>
+        <button onClick={()=>{
+          if(navigator.clipboard)navigator.clipboard.writeText(APPS_SCRIPT_CODE);
+        }} style={{position:'absolute',top:10,right:10,padding:'4px 10px',borderRadius:6,
+          border:'1px solid #334155',background:'#1E293B',color:'#94A3B8',
+          fontSize:10,cursor:'pointer',fontFamily:'DM Sans,sans-serif'}}>
+          Copy
+        </button>
+      </div>
+
+      {/* URL input */}
+      <div style={{background:'#fff',borderRadius:14,padding:'14px',
+        boxShadow:'0 2px 10px rgba(0,0,0,.05)',marginBottom:12}}>
+        <div style={{fontSize:11,fontWeight:700,color:'#1B2E4B',letterSpacing:'0.06em',marginBottom:8}}>
+          APPS SCRIPT WEB APP URL
+        </div>
+        <input value={url} onChange={e=>setUrl(e.target.value)}
+          placeholder="https://script.google.com/macros/s/..."
+          style={{width:'100%',padding:'10px 12px',borderRadius:9,
+            border:'1.5px solid #E2E8F0',fontSize:12,color:'#0F172A',
+            background:'#F8FAFC',marginBottom:8}}/>
+        <div style={{display:'flex',gap:8}}>
+          <button onClick={save}
+            style={{flex:1,padding:'11px',borderRadius:10,border:'none',cursor:'pointer',
+              background:saved?'#22C55E':'#1B2E4B',color:'#fff',fontSize:13,fontWeight:700,
+              transition:'background .2s'}}>
+            {saved?'✓ Saved':'Save URL'}
+          </button>
+          <button onClick={test} disabled={!url.trim()||testing}
+            style={{padding:'11px 16px',borderRadius:10,border:'1.5px solid #E2E8F0',
+              background:'#F8FAFC',color:'#374151',fontSize:13,fontWeight:600,cursor:'pointer'}}>
+            {testing?'…':'Test'}
+          </button>
+        </div>
+        {testResult&&(
+          <div style={{marginTop:8,fontSize:12,color:testResult==='ok'?'#22C55E':'#EF4444',fontWeight:600}}>
+            {testResult==='ok'?'✓ Connection looks good':'✗ Could not reach URL — check it and try again'}
+          </div>
+        )}
+      </div>
+
+      {syncPending>0&&(
+        <button onClick={onForceSync}
+          style={{width:'100%',padding:'13px',borderRadius:12,border:'none',
+            background:'#D97706',color:'#fff',fontSize:14,fontWeight:700,cursor:'pointer',
+            boxShadow:'0 4px 14px #D9770655'}}>
+          ↑ Sync {syncPending} Pending Session{syncPending>1?'s':''} Now
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── NAV BAR ───────────────────────────────────────────────────────────────────
+function NavBar({screen,setScreen,hasActive,syncPending}){
+  const tabs=[
+    {id:'home',icon:'⌂',label:'Today'},
+    {id:'session',icon:'▶',label:'Session',disabled:!hasActive},
+    {id:'history',icon:'◷',label:'History'},
+    {id:'settings',icon:'⚙',label:'Settings'},
+  ];
+  return(
+    <div style={{position:'fixed',bottom:0,left:'50%',transform:'translateX(-50%)',
+      width:'100%',maxWidth:430,background:'#fff',
+      borderTop:'1px solid #E8ECF0',display:'flex',
+      padding:'8px 0',
+      paddingBottom:`calc(8px + env(safe-area-inset-bottom))`,
+      boxShadow:'0 -4px 24px rgba(0,0,0,.08)',zIndex:100}}>
+      {tabs.map(t=>(
+        <button key={t.id} onClick={()=>!t.disabled&&setScreen(t.id)}
+          style={{flex:1,background:'none',border:'none',cursor:t.disabled?'default':'pointer',
+            display:'flex',flexDirection:'column',alignItems:'center',gap:2,
+            opacity:t.disabled?.3:1,padding:'2px 0',position:'relative'}}>
+          {t.id==='settings'&&syncPending>0&&(
+            <div style={{position:'absolute',top:0,right:'25%',width:7,height:7,
+              borderRadius:'50%',background:'#D97706'}}/>
+          )}
+          <span style={{fontSize:20,lineHeight:1,
+            filter:screen===t.id?'none':'grayscale(1) opacity(0.5)',
+            transition:'filter .15s'}}>
+            {t.icon==='⌂'?'🏠':t.icon==='▶'?'▶️':t.icon==='◷'?'🕐':'⚙️'}
+          </span>
+          <span style={{fontSize:9,fontWeight:700,letterSpacing:'0.05em',
+            color:screen===t.id?'#1B2E4B':'#94A3B8',transition:'color .15s'}}>
+            {t.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ── APP ───────────────────────────────────────────────────────────────────────
+export default function App(){
+  const [screen,setScreen]=useState('home');
+  const [sessions,setSessions]=useState(()=>ls.get(SK.sessions)||{});
+  const [queue,setQueue]=useState(()=>ls.get(SK.queue)||[]);
+  const [syncedIds,setSyncedIds]=useState(()=>ls.get(SK.synced)||[]);
+  const [sheetsUrl,setSheetsUrl]=useState(()=>ls.get(SK.url)||'');
+  const [activeSess,setActiveSess]=useState(null);
+  const [syncing,setSyncing]=useState(false);
+  const [syncError,setSyncError]=useState(false);
+
+  const saveToStorage=(newSessions,newQueue,newSynced)=>{
+    ls.set(SK.sessions,newSessions);
+    ls.set(SK.queue,newQueue);
+    ls.set(SK.synced,newSynced||syncedIds);
+  };
+
+  const trySync=useCallback(async(urlOverride,queueOverride)=>{
+    const url=urlOverride||sheetsUrl;
+    const q=queueOverride||queue;
+    if(!url||!navigator.onLine||!q.length)return;
+    setSyncing(true);setSyncError(false);
+    try{
+      await fetch(url,{method:'POST',mode:'no-cors',
+        body:JSON.stringify({rows:q,header:COLS})});
+      setQueue([]);ls.set(SK.queue,[]);
+      setSyncError(false);
+    }catch{setSyncError(true);}
+    setSyncing(false);
+  },[sheetsUrl,queue]);
+
+  useEffect(()=>{
+    trySync();
+    const handler=()=>trySync();
+    window.addEventListener('online',handler);
+    return()=>window.removeEventListener('online',handler);
+  },[]);
+
+  const lastForDay=useCallback((dayKey)=>{
+    const s=Object.values(sessions)
+      .filter(s=>s.dayKey===dayKey)
+      .sort((a,b)=>b.date.localeCompare(a.date)||b.startTime-a.startTime);
+    return s[0]||null;
+  },[sessions]);
+
+  const handleStart=(dayKey)=>{
+    const last=lastForDay(dayKey);
+    const sess=makeSession(dayKey,last);
+    if(!sess)return;
+    setActiveSess(sess);
+    setScreen('session');
+  };
+
+  const handleSave=async()=>{
+    if(!activeSess)return;
+    const finished={...activeSess,endTime:Date.now()};
+    const rows=sessionToRows(finished);
+    const newSessions={...sessions,[finished.id]:finished};
+    const newQueue=[...queue,...rows];
+    const newSynced=[...syncedIds];
+    setSessions(newSessions);
+    setQueue(newQueue);
+    saveToStorage(newSessions,newQueue,newSynced);
+    setActiveSess(null);
+    setScreen('home');
+    // Try to sync immediately
+    const url=sheetsUrl;
+    if(url&&navigator.onLine){
+      setSyncing(true);setSyncError(false);
+      try{
+        await fetch(url,{method:'POST',mode:'no-cors',
+          body:JSON.stringify({rows:newQueue,header:COLS})});
+        setQueue([]);ls.set(SK.queue,[]);
+        setSyncedIds(p=>{const n=[...p,finished.id];ls.set(SK.synced,n);return n;});
+      }catch{setSyncError(true);}
+      setSyncing(false);
+    }
+  };
+
+  const activeDay=activeSess?P[activeSess.dayKey]:null;
+
+  const renderSession=()=>{
+    if(!activeSess||!activeDay)return null;
+    if(activeDay.kind==='strength') return(
+      <StrengthSession sess={activeSess} setSess={setActiveSess}
+        lastSess={lastForDay(activeSess.dayKey)} onSave={handleSave}/>);
+    if(activeDay.kind==='z4') return(
+      <Z4Session sess={activeSess} setSess={setActiveSess} onSave={handleSave}/>);
+    if(activeDay.kind==='z2') return(
+      <Z2Session sess={activeSess} setSess={setActiveSess} onSave={handleSave}/>);
+    return null;
+  };
+
+  return(
+    <div style={{maxWidth:430,margin:'0 auto',minHeight:'100vh',background:'#F0F2F6',
+      position:'relative',fontFamily:'DM Sans,system-ui,sans-serif'}}>
+      {screen==='home'&&(
+        <HomeScreen onStart={handleStart} sessions={sessions}
+          syncPending={queue.length} syncError={syncError} syncBusy={syncing}
+          lastForDay={lastForDay}/>
+      )}
+      {screen==='session'&&renderSession()}
+      {screen==='history'&&<HistoryScreen sessions={sessions} syncedIds={syncedIds}/>}
+      {screen==='settings'&&(
+        <SettingsScreen sheetsUrl={sheetsUrl} setSheetsUrl={setSheetsUrl}
+          syncPending={queue.length}
+          onForceSync={()=>trySync()}/>
+      )}
+      <NavBar screen={screen} setScreen={setScreen}
+        hasActive={!!activeSess} syncPending={queue.length}/>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
