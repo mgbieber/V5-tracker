@@ -573,7 +573,7 @@ function makeSession(dayKey, date, lastSess, unit) {
       var _lastSess$exercises, _lastEx$sets;
       const lastEx = lastSess === null || lastSess === void 0 || (_lastSess$exercises = lastSess.exercises) === null || _lastSess$exercises === void 0 ? void 0 : _lastSess$exercises[i];
       const lastUnit = (lastSess === null || lastSess === void 0 ? void 0 : lastSess.unit) || 'lb';
-      const lastDone = (lastEx === null || lastEx === void 0 || (_lastEx$sets = lastEx.sets) === null || _lastEx$sets === void 0 ? void 0 : _lastEx$sets.filter(s => s.done && s.weight)) || [];
+      const lastDone = (lastEx === null || lastEx === void 0 || (_lastEx$sets = lastEx.sets) === null || _lastEx$sets === void 0 ? void 0 : _lastEx$sets.filter(s => s.weight && +s.reps > 0)) || [];
       return {
         ...ex,
         rpe: '',
@@ -633,7 +633,7 @@ function getExerciseHistory(exId, sessions, unit) {
     if (!sess.exercises) return;
     const ex = sess.exercises.find(e => e.id === exId);
     if (!ex) return;
-    const doneSets = ((_ex$sets = ex.sets) === null || _ex$sets === void 0 ? void 0 : _ex$sets.filter(s => s.done && s.weight && +s.reps > 0)) || [];
+    const doneSets = ((_ex$sets = ex.sets) === null || _ex$sets === void 0 ? void 0 : _ex$sets.filter(s => s.weight && +s.reps > 0)) || [];
     if (!doneSets.length) return;
     const sessUnit = sess.unit || 'lb';
     const topSet = doneSets.reduce((best, s) => {
@@ -1307,7 +1307,7 @@ function ExerciseCard(_ref7) {
   const done = ex.sets.filter(s => s.done).length;
   const getLastW = i => {
     var _lastEx$sets2, _d$i, _d$slice$;
-    const d = (lastEx === null || lastEx === void 0 || (_lastEx$sets2 = lastEx.sets) === null || _lastEx$sets2 === void 0 ? void 0 : _lastEx$sets2.filter(s => s.done && s.weight)) || [];
+    const d = (lastEx === null || lastEx === void 0 || (_lastEx$sets2 = lastEx.sets) === null || _lastEx$sets2 === void 0 ? void 0 : _lastEx$sets2.filter(s => s.weight && +s.reps > 0)) || [];
     return ((_d$i = d[i]) === null || _d$i === void 0 ? void 0 : _d$i.weight) || ((_d$slice$ = d.slice(-1)[0]) === null || _d$slice$ === void 0 ? void 0 : _d$slice$.weight) || null;
   };
   const histData = getExerciseHistory(ex.id, sessions, unit);
@@ -2809,7 +2809,8 @@ function HistoryScreen(_ref17) {
         borderTop: '1px solid #F1F5F9'
       }
     }, (_sess$exercises = sess.exercises) === null || _sess$exercises === void 0 ? void 0 : _sess$exercises.slice(0, 6).map(ex => {
-      const top = (ex.sets || []).filter(s => s.done && s.weight && s.reps).reduce((b, s) => epley(toLb(+s.weight, sessUnit), +s.reps) > epley(toLb(+(b.weight || 0), sessUnit), +(b.reps || 1)) ? s : b, {});
+      const loggedSets = (ex.sets || []).filter(s => s.weight && +s.reps > 0);
+      const top = loggedSets.reduce((b, s) => epley(toLb(+s.weight, sessUnit), +s.reps) > epley(toLb(+(b.weight || 0), sessUnit), +(b.reps || 1)) ? s : b, {});
       const dispW = top.weight ? toDisplay(toLb(+top.weight, sessUnit), unit) : '';
       const e1 = dispW ? epley(+dispW, +top.reps) : '';
       return /*#__PURE__*/React.createElement("div", {
@@ -2827,12 +2828,12 @@ function HistoryScreen(_ref17) {
           fontWeight: 600,
           color: '#374151'
         }
-      }, ex.name), (ex.sets || []).filter(s => s.done && s.weight).length > 0 && /*#__PURE__*/React.createElement("div", {
+      }, ex.name), loggedSets.length > 0 && /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 10,
           color: '#94A3B8'
         }
-      }, ex.sets.filter(s => s.done && s.weight).map(s => `${toDisplay(toLb(+s.weight, sessUnit), unit)}×${s.reps}`).join(' · '))), dispW && /*#__PURE__*/React.createElement("div", {
+      }, loggedSets.map(s => `${toDisplay(toLb(+s.weight, sessUnit), unit)}×${s.reps}`).join(' · '))), dispW && /*#__PURE__*/React.createElement("div", {
         style: {
           textAlign: 'right'
         }
