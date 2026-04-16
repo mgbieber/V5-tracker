@@ -2872,7 +2872,36 @@ function HistoryScreen(_ref17) {
         color: '#0F172A',
         fontWeight: 500
       }
-    }, p.split, p.hr ? ` · ${p.hr}bpm` : '')))), sess.sessionNotes && /*#__PURE__*/React.createElement("div", {
+    }, p.split, p.hr ? ` · ${p.hr}bpm` : '')))), (sess.duration || sess.avgHr || sess.pace) && /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginTop: 8
+      }
+    }, [['Duration', sess.duration, 'min'], ['Avg HR', sess.avgHr, 'bpm'], ['Avg Pace /500m', sess.pace, ''], ['Pace @ 140 bpm', sess.paceAt140, ''], ['HR @ 15 min', sess.hrAt15, 'bpm'], ['HR @ 30 min', sess.hrAt30, 'bpm'], ['HR @ 45 min', sess.hrAt45, 'bpm']].filter((_ref18) => {
+      let [, v] = _ref18;
+      return v;
+    }).map((_ref19, i) => {
+      let [label, value, u] = _ref19;
+      return /*#__PURE__*/React.createElement("div", {
+        key: i,
+        style: {
+          display: 'flex',
+          justifyContent: 'space-between',
+          padding: '5px 0',
+          borderBottom: '1px solid #F8FAFC',
+          fontSize: 12
+        }
+      }, /*#__PURE__*/React.createElement("span", {
+        style: {
+          color: '#374151'
+        }
+      }, label), /*#__PURE__*/React.createElement("span", {
+        className: "mono",
+        style: {
+          color: '#0F172A',
+          fontWeight: 500
+        }
+      }, value, u ? " " + u : ''));
+    })), sess.sessionNotes && /*#__PURE__*/React.createElement("div", {
       style: {
         marginTop: 8,
         fontSize: 11,
